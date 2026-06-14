@@ -7,6 +7,15 @@ cd /Users/wyatt/Desktop/ClipPilot
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"   # ffmpeg, node
 LOG="/Users/wyatt/Desktop/ClipPilot/clippilot.log"
 
+# Prevent two runs at once (they'd share work/ and delete each other's files).
+# mkdir is atomic; the lock auto-clears when this script exits.
+LOCKDIR="/tmp/clippilot.lock"
+if ! mkdir "$LOCKDIR" 2>/dev/null; then
+  echo "ClipPilot is already running — skipping this run." | tee -a "$LOG"
+  exit 0
+fi
+trap 'rmdir "$LOCKDIR" 2>/dev/null' EXIT
+
 echo "===== $(date) : ClipPilot run starting =====" >> "$LOG"
 
 # 1) Ensure the bgutil PO-token provider is up (beats YouTube SABR).

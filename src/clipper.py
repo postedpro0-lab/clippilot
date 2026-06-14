@@ -12,45 +12,75 @@ def _fmt_ass_time(t):
     return f"{h:d}:{m:02d}:{s:05.2f}"
 
 
-def _chunk_words(words, max_words=4):
-    """Group words into short caption chunks (max ~4 words) for readability."""
-    chunks, cur = [], []
+def _clean(word):
+    """Uppercase a word and strip chars that would break ASS markup."""
+    return word.strip().upper().replace("{", "").replace("}", "").replace("\\", "")
+
+
+def _group_words(words, max_per=3):
+    """Group words into short phrases (<= max_per), breaking early on end
+    punctuation so a phrase never spans a natural pause."""
+    groups, cur = [], []
     for w in words:
         cur.append(w)
-        if len(cur) >= max_words:
-            chunks.append(cur)
+        ends_phrase = w["word"].strip().endswith((".", "!", "?", ",", ":", ";"))
+        if len(cur) >= max_per or ends_phrase:
+            groups.append(cur)
             cur = []
     if cur:
-        chunks.append(cur)
-    return chunks
+        groups.append(cur)
+    return groups
 
 
 def _build_ass(words, start, end, out_w, out_h, ass_path):
-    """Write an .ass subtitle file (times relative to clip start)."""
-    fontsize = int(out_h * 0.052)
-    margin_v = int(out_h * 0.18)  # sit captions in lower third
+    """Write an .ass file where words pop in one-at-a-time as they're spoken.
+
+    At most a few words are on screen at once (a phrase), each new word
+    scale-pops in; the phrase clears before the next. Smart word-wrap +
+    generous side margins keep text inside the 9:16 frame (no edge cutoff)."""
+    fontsize = int(out_h * 0.050)            # punchy but leaves room to wrap
+    margin_v = int(out_h * 0.20)             # lower third, clear of platform UI
+    margin_h = int(out_w * 0.10)             # keep words off the L/R edges
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {out_w}
 PlayResY: {out_h}
-WrapStyle: 2
+WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV
-Style: Pop,Arial,{fontsize},&H00FFFFFF,&H00000000,&H80000000,1,1,4,2,2,60,60,{margin_v}
+Style: Pop,Arial,{fontsize},&H00FFFFFF,&H00000000,&H90000000,1,1,6,2,2,{margin_h},{margin_h},{margin_v}
 
 [Events]
-Format: Layer, Start, End, Style, Text
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, Effect, Text
 """
     lines = []
     clip_words = [w for w in words if start <= w["start"] < end]
-    for chunk in _chunk_words(clip_words, max_words=4):
-        c_start = max(chunk[0]["start"] - start, 0)
-        c_end = max(chunk[-1]["end"] - start, c_start + 0.4)
-        text = " ".join(w["word"] for w in chunk).replace("\n", " ").upper()
-        lines.append(
-            f"Dialogue: 0,{_fmt_ass_time(c_start)},{_fmt_ass_time(c_end)},Pop,,0,0,0,,{text}"
+    groups = _group_words(clip_words, max_per=3)
+
+    for gi, group in enumerate(groups):
+        next_group_start = (
+            groups[gi + 1][0]["start"] if gi + 1 < len(groups) else end
         )
+        # the finished phrase lingers briefly, but never into the next phrase
+        hold_end = min(group[-1]["end"] + 0.25, next_group_start)
+
+        for j, w in enumerate(group):
+            ev_start = max(w["start"] - start, 0.0)
+            if j + 1 < len(group):
+                ev_end = group[j + 1]["start"] - start
+            else:
+                ev_end = hold_end - start
+            ev_end = max(ev_end, ev_start + 0.10)
+
+            # cumulative phrase so far; the newest (last) word scale-pops in
+            tokens = [_clean(group[k]["word"]) for k in range(j + 1)]
+            tokens[-1] = r"{\fscx60\fscy60\t(0,110,\fscx100\fscy100)}" + tokens[-1]
+            text = " ".join(tokens)
+            lines.append(
+                f"Dialogue: 0,{_fmt_ass_time(ev_start)},{_fmt_ass_time(ev_end)},Pop,,0,0,,{text}"
+            )
+
     ass_path.write_text(header + "\n".join(lines))
 
 

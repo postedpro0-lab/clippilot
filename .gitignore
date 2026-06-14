@@ -12,3 +12,6 @@ __pycache__/
 tokens/
 cookies.txt
 *.cookies
+.venv/
+.potprovider/
+downloaded_clips/

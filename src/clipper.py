@@ -54,18 +54,7 @@ Format: Layer, Start, End, Style, Text
     ass_path.write_text(header + "\n".join(lines))
 
 
-def make_clip(source, words, start, end, out_w, out_h, out_path):
-    """Produce one captioned 9:16 clip."""
-    ass_path = Path(str(out_path) + ".ass")
-    _build_ass(words, start, end, out_w, out_h, ass_path)
-
-    # scale source to fill the 9:16 frame, center-crop, then burn captions.
-    vf = (
-        f"scale={out_w}:{out_h}:force_original_aspect_ratio=increase,"
-        f"crop={out_w}:{out_h},"
-        f"subtitles='{ass_path.as_posix()}'"
-    )
-
+def _run_ffmpeg(source, start, end, vf, out_path):
     cmd = [
         "ffmpeg", "-y",
         "-ss", str(start),
@@ -77,7 +66,32 @@ def make_clip(source, words, start, end, out_w, out_h, out_path):
         "-movflags", "+faststart",
         str(out_path),
     ]
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+def make_clip(source, words, start, end, out_w, out_h, out_path):
+    """Produce a 9:16 clip with burned-in captions; fall back to no captions if
+    this ffmpeg build lacks the subtitles filter (no libass)."""
+    ass_path = Path(str(out_path) + ".ass")
+    _build_ass(words, start, end, out_w, out_h, ass_path)
+
+    crop = (
+        f"scale={out_w}:{out_h}:force_original_aspect_ratio=increase,"
+        f"crop={out_w}:{out_h}"
+    )
+    # libass wants ':' and '\' in the path escaped inside the filtergraph.
+    esc = ass_path.as_posix().replace("\\", "\\\\").replace(":", r"\:")
+    captioned_vf = f"{crop},subtitles='{esc}'"
+
     print(f"[clipper] -> {out_path.name} ({start:.0f}-{end:.0f}s)")
-    subprocess.run(cmd, check=True, capture_output=True)
+    res = _run_ffmpeg(source, start, end, captioned_vf, out_path)
+    if res.returncode != 0:
+        err = (res.stderr or "")[-400:]
+        print(f"[clipper] captioned encode failed, retrying WITHOUT captions: {err}")
+        res = _run_ffmpeg(source, start, end, crop, out_path)
+        if res.returncode != 0:
+            ass_path.unlink(missing_ok=True)
+            raise RuntimeError(f"ffmpeg failed: {(res.stderr or '')[-400:]}")
+
     ass_path.unlink(missing_ok=True)
     return out_path

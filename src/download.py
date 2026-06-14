@@ -6,9 +6,14 @@ line — that's the path proven to get past YouTube's bot check + SABR
 streaming. Cookies + the PO-token provider together unblock downloads.
 """
 import subprocess
+import sys
 from pathlib import Path
 
 from .config import WORK, env
+
+# Invoke yt-dlp as a module of the *current* interpreter so the right venv
+# (with the PO-token plugin installed) is always used — both locally and in CI.
+YTDLP = [sys.executable, "-m", "yt_dlp"]
 
 # cap at 1080p source — plenty for a 1080x1920 crop. No ext constraint: the
 # merge step remuxes to mp4, and forcing ext=mp4/m4a breaks on clients that
@@ -22,7 +27,7 @@ def download(video_url, video_id):
         return out_path
 
     base = [
-        "yt-dlp",
+        *YTDLP,
         "-f", FORMAT,
         "--merge-output-format", "mp4",
         "-o", str(WORK / f"{video_id}.%(ext)s"),

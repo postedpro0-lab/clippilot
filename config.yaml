@@ -17,7 +17,7 @@ channels:
 
 # ---- Clipping behavior -------------------------------------
 clip_seconds: 30                # length of each short
-max_clips_per_video: 1          # how many shorts to make per new upload
+max_clips_per_video: 5          # how many shorts to make per new upload
 min_clip_gap_seconds: 15        # don't pick overlapping/adjacent moments
 
 # 9:16 output size (don't change unless you know why)

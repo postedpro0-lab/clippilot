@@ -1,0 +1,54 @@
+# ============================================================
+#  ClipPilot config — edit this, commit it, you're done.
+# ============================================================
+
+# =====================  CHANNELS  ===========================
+# The YouTube channels you are approved/licensed to clip.
+# Add as many as you want. Each line can be a @handle, a full channel URL,
+# or a raw channel_id (UC...). They're resolved automatically at runtime —
+# no separate script step needed.
+#
+# Each channel's clips land in their own folder: work/<channel>/...
+channels:
+  - "@foxsports"
+  - "@fifa"
+  - "@Foxsoccer"
+# ============================================================
+
+# ---- Clipping behavior -------------------------------------
+clip_seconds: 30                # length of each short
+max_clips_per_video: 5          # how many shorts to make per new upload
+min_clip_gap_seconds: 15        # don't pick overlapping/adjacent moments
+
+# 9:16 output size (don't change unless you know why)
+out_width: 1080
+out_height: 1920
+
+# ---- Transcription (local, free) ---------------------------
+whisper_model: "base"           # tiny | base | small | medium  (bigger = slower, better)
+whisper_language: "en"          # set "" for auto-detect
+
+# ---- First run safety --------------------------------------
+# false = on the very first run, mark all existing videos as "seen" and make
+#         nothing (so you don't clip the entire back catalog at once).
+# true  = process the most recent upload on first run too.
+process_backlog: true
+
+# ---- Posting -----------------------------------------------
+# Turn each platform on/off. Credentials live in GitHub Secrets / .env,
+# never in this file.
+post_to:
+  youtube: true
+  instagram: true
+  tiktok: false                 # leave false until your TikTok app is approved (see README)
+  snapchat: false               # leave false until your Snapchat Public Profile is approved (see README)
+
+# For Snapchat: "SPOTLIGHT" (TikTok-style feed) or "STORY" (24h)
+snapchat_target: "SPOTLIGHT"
+
+# Caption + hashtags for the posts
+caption_template: "{title} 🔥 #shorts #viral #fyp"
+extra_hashtags: ["#clips", "#trending"]
+
+# Space posts out so platforms don't flag you as spam (seconds between posts)
+post_spacing_seconds: 90

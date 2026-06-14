@@ -1,0 +1,12 @@
+.env
+work/
+*.mp4
+*.mkv
+*.webm
+*.part
+*.ass
+*.srt
+__pycache__/
+*.pyc
+.DS_Store
+tokens/

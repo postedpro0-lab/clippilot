@@ -16,6 +16,13 @@ jobs:
   run:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    services:
+      # PO token provider — generates the proof-of-origin tokens YouTube's SABR
+      # streaming now requires, so yt-dlp can fetch real downloadable formats.
+      potprovider:
+        image: brainicism/bgutil-ytdlp-pot-provider:latest
+        ports:
+          - 4416:4416
     steps:
       - uses: actions/checkout@v4
 
@@ -41,6 +48,20 @@ jobs:
           else
             echo "No YOUTUBE_COOKIES_B64 secret set — running without cookies."
           fi
+
+      - name: PO token smoke test
+        continue-on-error: true
+        env:
+          YOUTUBE_COOKIES_FILE: ${{ env.YOUTUBE_COOKIES_FILE }}
+        run: |
+          echo "--- provider ping ---"
+          curl -s http://127.0.0.1:4416/ping || echo "(provider not reachable)"
+          echo; echo "--- yt-dlp PO token + download test (Rickroll) ---"
+          COOK=""; [ -n "$YOUTUBE_COOKIES_FILE" ] && COOK="--cookies $YOUTUBE_COOKIES_FILE"
+          yt-dlp -v $COOK -f "best[height<=720]/best" -o "/tmp/smoke.%(ext)s" \
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ" 2>&1 \
+            | grep -iE "PO Token|GVS|missing a url|SABR|Destination|100%|ERROR|Forbidden" | tail -20
+          echo "--- result ---"; ls -la /tmp/smoke.* 2>/dev/null && echo "SMOKE TEST: DOWNLOAD SUCCEEDED" || echo "SMOKE TEST: no file"
 
       - name: Run ClipPilot
         env:

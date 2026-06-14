@@ -30,8 +30,21 @@ jobs:
       - name: Install deps
         run: pip install -r requirements.txt
 
+      - name: Write YouTube cookies (if provided)
+        env:
+          YOUTUBE_COOKIES_B64: ${{ secrets.YOUTUBE_COOKIES_B64 }}
+        run: |
+          if [ -n "$YOUTUBE_COOKIES_B64" ]; then
+            echo "$YOUTUBE_COOKIES_B64" | base64 -d > "$RUNNER_TEMP/yt_cookies.txt"
+            echo "YOUTUBE_COOKIES_FILE=$RUNNER_TEMP/yt_cookies.txt" >> "$GITHUB_ENV"
+            echo "Cookies file written ($(wc -l < "$RUNNER_TEMP/yt_cookies.txt") lines)."
+          else
+            echo "No YOUTUBE_COOKIES_B64 secret set — running without cookies."
+          fi
+
       - name: Run ClipPilot
         env:
+          YOUTUBE_COOKIES_FILE: ${{ env.YOUTUBE_COOKIES_FILE }}
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}

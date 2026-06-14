@@ -56,11 +56,14 @@ jobs:
         run: |
           echo "--- provider ping ---"
           curl -s http://127.0.0.1:4416/ping || echo "(provider not reachable)"
-          echo; echo "--- yt-dlp PO token + download test (Rickroll) ---"
           COOK=""; [ -n "$YOUTUBE_COOKIES_FILE" ] && COOK="--cookies $YOUTUBE_COOKIES_FILE"
-          yt-dlp -v $COOK -f "best[height<=720]/best" -o "/tmp/smoke.%(ext)s" \
-            "https://www.youtube.com/watch?v=dQw4w9WgXcQ" 2>&1 \
-            | grep -iE "PO Token|GVS|missing a url|SABR|Destination|100%|ERROR|Forbidden" | tail -20
+          echo; echo "--- A) cookie validity check (whoami via :feed/history needs auth) ---"
+          yt-dlp $COOK --simulate --no-warnings "https://www.youtube.com/feed/history" 2>&1 | tail -3
+          echo; echo "--- B) actual foxsports target WITH cookies + PO token ---"
+          yt-dlp -v $COOK -f "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best" \
+            --merge-output-format mp4 -o "/tmp/smoke.%(ext)s" \
+            "https://www.youtube.com/watch?v=kwEHmHBZPD8" 2>&1 \
+            | grep -iE "PO Token|GVS|missing a url|SABR|Destination|100%|ERROR|Forbidden|not a bot" | tail -20
           echo "--- result ---"; ls -la /tmp/smoke.* 2>/dev/null && echo "SMOKE TEST: DOWNLOAD SUCCEEDED" || echo "SMOKE TEST: no file"
 
       - name: Run ClipPilot

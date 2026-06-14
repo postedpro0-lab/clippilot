@@ -48,36 +48,38 @@ def fetch_feed(channel_id):
 
 
 def find_new_videos(channel_id, process_backlog=False):
-    """Return new (unseen) videos. On first run, optionally seed without processing."""
+    """Return the single MOST RECENT upload that hasn't been clipped yet.
+
+    Each run grabs at most one video per channel — the newest one not already
+    in `seen`. If the latest upload was already clipped, returns nothing (no
+    pointless re-clipping). Any older un-clipped videos are marked seen so we
+    only ever move forward, never backwards into stale uploads.
+
+    `process_backlog` is accepted for compatibility but no longer changes
+    behavior: we always target the most-recent un-clipped upload.
+    """
     seen = _load_seen()
-    feed = fetch_feed(channel_id)
-    # Per-channel first run: this channel has never been processed if NONE of its
-    # current feed videos are in the (shared) seen list. This keeps each channel
-    # independent so seeding one channel doesn't make the next look "fully new".
-    channel_first_run = not any(v["id"] in seen["ids"] for v in feed)
+    feed = fetch_feed(channel_id)  # newest-first
+    if not feed:
+        print("[monitor] empty feed.")
+        return []
 
-    if channel_first_run:
-        if not process_backlog:
-            # Mark this channel's whole feed as seen and make nothing.
-            seen["ids"].extend(v["id"] for v in feed)
-            _save_seen(seen)
-            print(f"[monitor] First run for this channel: seeded {len(feed)} existing "
-                  "videos as seen. Future uploads will be clipped.")
-            return []
-        # process_backlog: clip only the single most recent upload, seed the rest
-        # as seen so we don't flood with the entire back catalog.
-        newest = feed[:1]  # feed is newest-first
-        seen["ids"].extend(v["id"] for v in feed[1:])
+    # newest-first scan → first video not yet clipped is the most recent new one
+    target = next((v for v in feed if v["id"] not in seen["ids"]), None)
+
+    if target is None:
+        print("[monitor] most recent upload already clipped — nothing new.")
+        return []
+
+    # Seed everything else (older uploads + already-seen) so we never revisit
+    # older videos; only the target gets clipped (marked done after posting).
+    others = [v["id"] for v in feed if v["id"] != target["id"] and v["id"] not in seen["ids"]]
+    if others:
+        seen["ids"].extend(others)
         _save_seen(seen)
-        print(f"[monitor] First run (backlog) for this channel: processing most recent "
-              f"upload, seeded {len(feed) - 1} older videos as seen.")
-        return newest
 
-    new = [v for v in feed if v["id"] not in seen["ids"]]
-    # newest first in the feed; process oldest-of-the-new first so order is natural
-    new = list(reversed(new))
-    print(f"[monitor] {len(new)} new video(s) found.")
-    return new
+    print(f"[monitor] new upload to clip: {target['title'][:70]}")
+    return [target]
 
 
 def mark_done(video_id):

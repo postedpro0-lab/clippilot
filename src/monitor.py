@@ -51,23 +51,26 @@ def find_new_videos(channel_id, process_backlog=False):
     """Return new (unseen) videos. On first run, optionally seed without processing."""
     seen = _load_seen()
     feed = fetch_feed(channel_id)
-    first_run = len(seen["ids"]) == 0
+    # Per-channel first run: this channel has never been processed if NONE of its
+    # current feed videos are in the (shared) seen list. This keeps each channel
+    # independent so seeding one channel doesn't make the next look "fully new".
+    channel_first_run = not any(v["id"] in seen["ids"] for v in feed)
 
-    if first_run:
+    if channel_first_run:
         if not process_backlog:
-            # Mark everything currently in the feed as seen and make nothing.
-            seen["ids"] = [v["id"] for v in feed]
+            # Mark this channel's whole feed as seen and make nothing.
+            seen["ids"].extend(v["id"] for v in feed)
             _save_seen(seen)
-            print(f"[monitor] First run: seeded {len(seen['ids'])} existing videos as seen. "
-                  "Future uploads will be clipped.")
+            print(f"[monitor] First run for this channel: seeded {len(feed)} existing "
+                  "videos as seen. Future uploads will be clipped.")
             return []
         # process_backlog: clip only the single most recent upload, seed the rest
         # as seen so we don't flood with the entire back catalog.
         newest = feed[:1]  # feed is newest-first
-        seen["ids"] = [v["id"] for v in feed[1:]]
+        seen["ids"].extend(v["id"] for v in feed[1:])
         _save_seen(seen)
-        print(f"[monitor] First run (backlog): processing most recent upload, "
-              f"seeded {len(seen['ids'])} older videos as seen.")
+        print(f"[monitor] First run (backlog) for this channel: processing most recent "
+              f"upload, seeded {len(feed) - 1} older videos as seen.")
         return newest
 
     new = [v for v in feed if v["id"] not in seen["ids"]]

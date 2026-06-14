@@ -12,8 +12,10 @@ def download(video_url, video_id):
         return out_path
 
     base_opts = {
-        # cap at 1080p source — plenty for a 1080x1920 crop, keeps it fast/small
-        "format": "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]/best",
+        # cap at 1080p source — plenty for a 1080x1920 crop, keeps it fast/small.
+        # No ext constraint: merge_output_format remuxes to mp4, and forcing
+        # ext=mp4/m4a breaks on player clients that only expose webm/opus.
+        "format": "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
         "outtmpl": str(WORK / f"{video_id}.%(ext)s"),
         "merge_output_format": "mp4",
         "quiet": True,
@@ -29,10 +31,11 @@ def download(video_url, video_id):
     if cookies and Path(cookies).exists():
         base_opts["cookiefile"] = cookies
 
-    # YouTube bot-blocks datacenter IPs (e.g. GitHub Actions) on the default
-    # "web" player client. Try alternate player clients in order; some bypass the
-    # check without cookies. First one that downloads wins.
+    # With cookies the default "web" client works and exposes the richest
+    # formats, so try it first. The alternate clients are fallbacks for the
+    # cookieless / datacenter-IP case. None = let yt-dlp pick the default.
     client_attempts = [
+        None,
         ["tv"],
         ["web_safari"],
         ["mweb"],
@@ -44,7 +47,8 @@ def download(video_url, video_id):
     last_err = None
     for clients in client_attempts:
         opts = dict(base_opts)
-        opts["extractor_args"] = {"youtube": {"player_client": clients}}
+        if clients is not None:
+            opts["extractor_args"] = {"youtube": {"player_client": clients}}
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.download([video_url])

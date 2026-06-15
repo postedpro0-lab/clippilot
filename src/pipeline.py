@@ -67,6 +67,7 @@ def process_video(cfg, video, source_label="channel"):
         min_clip_seconds=cfg.get("min_clip_seconds", 8),
         max_clips=cfg["max_clips_per_video"],
         video_duration=duration,
+        source=src,
     )
 
     caption = _build_caption(cfg, video["title"])
@@ -110,7 +111,10 @@ def run():
             continue
         label = resolve.label(entry)
         print(f"\n##### Channel: {entry} -> {cid} (folder: {label}) #####")
-        new_videos = monitor.find_new_videos(cid, process_backlog=backlog)
+        new_videos = monitor.find_new_videos(
+            cid, process_backlog=backlog,
+            min_source_seconds=cfg.get("min_source_seconds", 90),
+        )
         for v in new_videos:
             try:
                 process_video(cfg, v, source_label=label)

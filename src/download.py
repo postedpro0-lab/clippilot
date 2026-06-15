@@ -21,6 +21,25 @@ YTDLP = [sys.executable, "-m", "yt_dlp"]
 FORMAT = "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
 
 
+def get_duration(video_url):
+    """Return the video's duration in seconds (metadata only, no download),
+    or None if it can't be determined. Used to skip Shorts."""
+    try:
+        r = subprocess.run(
+            [*YTDLP, "--no-warnings", "--skip-download", "--print", "%(duration)s", video_url],
+            capture_output=True, text=True, timeout=90,
+        )
+        for line in reversed(r.stdout.strip().splitlines()):
+            line = line.strip()
+            try:
+                return float(line)
+            except ValueError:
+                continue
+    except Exception as e:
+        print(f"[download] duration probe failed: {str(e)[:100]}")
+    return None
+
+
 def download(video_url, video_id):
     out_path = WORK / f"{video_id}.mp4"
     if out_path.exists():

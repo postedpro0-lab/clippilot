@@ -9,6 +9,7 @@ Free heuristic (no paid AI):
 4. Greedily keep the top non-overlapping clips, up to max_clips.
 """
 import re
+import subprocess
 
 HOOK_WORDS = {
     "you", "your", "why", "how", "what", "secret", "never", "always", "best",
@@ -69,11 +70,17 @@ def _units(words, pause_gap=0.45):
 
 
 def pick_moments(words, max_clip_seconds=60, min_clip_seconds=8, max_clips=5,
-                 video_duration=None, **_legacy):
+                 video_duration=None, source=None, **_legacy):
     """Return list of (start, end) tuples for the best clips, at natural
-    boundaries, each between min_clip_seconds and max_clip_seconds long."""
+    boundaries, each between min_clip_seconds and max_clip_seconds long.
+
+    With speech: cuts on sentence/pause boundaries. Without speech (e.g. a
+    silent action clip): cuts on visual scene changes so clips don't break
+    mid-action; falls back to even splits if scene detection finds nothing.
+    """
     if not words:
-        return _fallback_even(video_duration, min_clip_seconds, max_clip_seconds, max_clips)
+        return _scene_or_even(source, video_duration, min_clip_seconds,
+                              max_clip_seconds, max_clips)
 
     units = _units(words)
     spans = [(u[0]["start"], u[-1]["end"], u) for u in units]
@@ -103,7 +110,8 @@ def pick_moments(words, max_clip_seconds=60, min_clip_seconds=8, max_clips=5,
                                "score": _score_window(win, text, target_len)})
 
     if not candidates:
-        return _fallback_even(hard_end, min_clip_seconds, max_clip_seconds, max_clips)
+        return _scene_or_even(source, hard_end, min_clip_seconds,
+                              max_clip_seconds, max_clips)
 
     candidates.sort(key=lambda c: c["score"], reverse=True)
 
@@ -129,11 +137,65 @@ def pick_moments(words, max_clip_seconds=60, min_clip_seconds=8, max_clips=5,
     return out
 
 
+def _probe_duration(source):
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=nokey=1:noprint_wrappers=1", str(source)],
+            capture_output=True, text=True, timeout=60,
+        )
+        return float(r.stdout.strip())
+    except Exception:
+        return None
+
+
+def scene_cuts(source, threshold=0.4):
+    """Return sorted timestamps (s) where the video changes scene, via ffmpeg's
+    scene-detection filter. Used to cut silent/action footage on real visual
+    boundaries instead of mid-action."""
+    cmd = ["ffmpeg", "-i", str(source), "-filter:v",
+           f"select='gt(scene,{threshold})',showinfo", "-an", "-f", "null", "-"]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    except Exception as e:
+        print(f"[moments] scene detection failed: {str(e)[:100]}")
+        return []
+    cuts = [float(m.group(1)) for m in re.finditer(r"pts_time:([0-9.]+)", r.stderr)]
+    return sorted(set(cuts))
+
+
+def _clips_from_cuts(cuts, duration, min_len, max_len, max_clips):
+    """Tile the video into up to max_clips clips that start AND end on scene
+    changes (so no clip breaks mid-action), each near the target length."""
+    bounds = sorted({round(c, 2) for c in cuts if 0 < c < duration})
+    target = min(max(duration / max_clips, min_len), max_len)
+    clips, cur = [], 0.0
+    while cur < duration - min_len and len(clips) < max_clips:
+        ideal = cur + target
+        window = [b for b in bounds if cur + min_len <= b <= min(cur + max_len, duration)]
+        end = min(window, key=lambda b: abs(b - ideal)) if window else min(cur + target, duration)
+        clips.append((cur, end))
+        cur = end
+    return clips
+
+
+def _scene_or_even(source, duration, min_len, max_len, max_clips):
+    """No transcript: prefer scene-change cuts; fall back to even splits."""
+    if source:
+        if not duration:
+            duration = _probe_duration(source)
+        cuts = scene_cuts(source)
+        if cuts and duration:
+            clips = _clips_from_cuts(cuts, duration, min_len, max_len, max_clips)
+            if clips:
+                print(f"[moments] scene-based picked {len(clips)} clips: "
+                      + ", ".join(f"{s:.0f}-{e:.0f}s" for s, e in clips))
+                return clips
+    return _fallback_even(duration, min_len, max_len, max_clips)
+
+
 def _fallback_even(duration, min_len, max_len, max_clips):
-    """No usable speech — split the video into up to max_clips evenly-spaced
-    clips. Without a transcript we can't find natural boundaries; this at least
-    yields several clips instead of one. (For true action-aware cuts on silent
-    footage, scene-change detection would be needed.)"""
+    """Last resort — split into up to max_clips evenly-spaced clips."""
     if not duration or duration < min_len:
         return [(0.0, duration or max_len)]
     target = min(max(duration / max_clips, min_len), max_len)

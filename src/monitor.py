@@ -47,38 +47,51 @@ def fetch_feed(channel_id):
     return videos
 
 
-def find_new_videos(channel_id, process_backlog=False):
-    """Return the single MOST RECENT upload that hasn't been clipped yet.
+def find_new_videos(channel_id, process_backlog=False, min_source_seconds=90):
+    """Return the single MOST RECENT un-clipped LONG-FORM upload for a channel.
 
-    Each run grabs at most one video per channel — the newest one not already
-    in `seen`. If the latest upload was already clipped, returns nothing (no
-    pointless re-clipping). Any older un-clipped videos are marked seen so we
-    only ever move forward, never backwards into stale uploads.
-
-    `process_backlog` is accepted for compatibility but no longer changes
-    behavior: we always target the most-recent un-clipped upload.
+    Walks newest-first, skipping videos already clipped and Shorts (anything
+    shorter than min_source_seconds — we want long videos to slice into many
+    sub-60s clips). The chosen video is the only one returned; all skipped/older
+    ones are marked seen so we only ever move forward and never re-probe them.
     """
+    from . import download  # local import to avoid a circular import at load
+
     seen = _load_seen()
     feed = fetch_feed(channel_id)  # newest-first
     if not feed:
         print("[monitor] empty feed.")
         return []
 
-    # newest-first scan → first video not yet clipped is the most recent new one
-    target = next((v for v in feed if v["id"] not in seen["ids"]), None)
+    target = None
+    seed_ids = []
+    for v in feed:
+        if v["id"] in seen["ids"]:
+            continue
+        dur = download.get_duration(v["url"])
+        if dur is not None and dur < min_source_seconds:
+            print(f"[monitor] skipping Short ({dur:.0f}s): {v['title'][:55]}")
+            seed_ids.append(v["id"])
+            continue
+        target = v  # most recent un-clipped long-form video
+        break
 
-    if target is None:
-        print("[monitor] most recent upload already clipped — nothing new.")
-        return []
-
-    # Seed everything else (older uploads + already-seen) so we never revisit
-    # older videos; only the target gets clipped (marked done after posting).
-    others = [v["id"] for v in feed if v["id"] != target["id"] and v["id"] not in seen["ids"]]
-    if others:
-        seen["ids"].extend(others)
+    # mark skipped Shorts + everything older than the target as seen
+    if target is not None:
+        cut = feed.index(target)
+        seed_ids += [v["id"] for v in feed[cut + 1:] if v["id"] not in seen["ids"]]
+    else:
+        seed_ids += [v["id"] for v in feed if v["id"] not in seen["ids"]]
+    seed_ids = [i for i in dict.fromkeys(seed_ids) if i not in seen["ids"]]
+    if seed_ids:
+        seen["ids"].extend(seed_ids)
         _save_seen(seen)
 
-    print(f"[monitor] new upload to clip: {target['title'][:70]}")
+    if target is None:
+        print("[monitor] no new long-form upload to clip.")
+        return []
+
+    print(f"[monitor] new long video to clip: {target['title'][:65]}")
     return [target]
 
 

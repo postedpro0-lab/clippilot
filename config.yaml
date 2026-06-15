@@ -15,11 +15,17 @@ channels:
   - "@Foxsoccer"
 # ============================================================
 
+# ---- Source selection --------------------------------------
+# Only clip long-form videos; skip Shorts. Videos shorter than this (seconds)
+# are treated as Shorts and ignored. Long videos get sliced into many clips.
+min_source_seconds: 90
+
 # ---- Clipping behavior -------------------------------------
-# Clips are variable length, cut on natural speech boundaries (never mid-action).
+# Clips are variable length, cut on natural boundaries (speech pauses, or visual
+# scene changes for silent footage) so they never break mid-action.
 max_clip_seconds: 60            # a clip can be up to this long (must stay < 60)
 min_clip_seconds: 8             # ignore segments shorter than this
-max_clips_per_video: 5          # how many shorts to make per new upload
+max_clips_per_video: 5          # how many clips to make per long video
 
 # 9:16 output size (don't change unless you know why)
 out_width: 1080

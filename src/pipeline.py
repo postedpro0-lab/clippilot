@@ -68,6 +68,8 @@ def process_video(cfg, video, source_label="channel"):
         max_clips=cfg["max_clips_per_video"],
         video_duration=duration,
         source=src,
+        moment_pause=cfg.get("moment_pause_seconds", 1.0),
+        scene_quiet=cfg.get("scene_quiet_seconds", 3.0),
     )
 
     caption = _build_caption(cfg, video["title"])

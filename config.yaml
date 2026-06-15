@@ -24,8 +24,12 @@ min_source_seconds: 90
 # Clips are variable length, cut on natural boundaries (speech pauses, or visual
 # scene changes for silent footage) so they never break mid-action.
 max_clip_seconds: 60            # a clip can be up to this long (must stay < 60)
-min_clip_seconds: 8             # ignore segments shorter than this
+min_clip_seconds: 4             # drop moments shorter than this (keeps short plays, skips blips)
 max_clips_per_video: 10         # how many clips to make per long video
+
+# A clip ends only when the ACTION is over, not at every sentence/scene change:
+moment_pause_seconds: 1.5       # a commentary pause this long = "moment over"
+scene_quiet_seconds: 3.0        # a calm shot this long (no scene change) = "action settled"
 
 # 9:16 output size (don't change unless you know why)
 out_width: 1080

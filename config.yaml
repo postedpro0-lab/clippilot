@@ -16,9 +16,10 @@ channels:
 # ============================================================
 
 # ---- Clipping behavior -------------------------------------
-clip_seconds: 30                # length of each short
+# Clips are variable length, cut on natural speech boundaries (never mid-action).
+max_clip_seconds: 60            # a clip can be up to this long (must stay < 60)
+min_clip_seconds: 8             # ignore segments shorter than this
 max_clips_per_video: 5          # how many shorts to make per new upload
-min_clip_gap_seconds: 15        # don't pick overlapping/adjacent moments
 
 # 9:16 output size (don't change unless you know why)
 out_width: 1080

@@ -63,9 +63,9 @@ def process_video(cfg, video, source_label="channel"):
     duration = words[-1]["end"] if words else None
     windows = moments.pick_moments(
         words,
-        clip_seconds=cfg["clip_seconds"],
+        max_clip_seconds=cfg.get("max_clip_seconds", 60),
+        min_clip_seconds=cfg.get("min_clip_seconds", 8),
         max_clips=cfg["max_clips_per_video"],
-        min_gap=cfg["min_clip_gap_seconds"],
         video_duration=duration,
     )
 

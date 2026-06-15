@@ -1,10 +1,12 @@
-"""Pick the most 'clippable' ~30s windows from a transcript.
+"""Pick the best clippable segments from a transcript.
 
-Free heuristic (no paid AI): slide a window over the speech and score it by
-- speech density (more talking, less dead air = better)
-- hook words (questions, numbers, emotional/curiosity triggers)
-- ending on a sentence boundary (clips that don't cut mid-word feel finished)
-Then take the top N non-overlapping windows.
+Free heuristic (no paid AI):
+1. Split speech into natural units (sentences / pauses) so clips never start or
+   end mid-action.
+2. Build candidate clips from contiguous runs of those units, each between
+   min_clip_seconds and max_clip_seconds long (variable length, <= 60s).
+3. Score each candidate (speech density + hook words + numbers + clean ending).
+4. Greedily keep the top non-overlapping clips, up to max_clips.
 """
 import re
 
@@ -13,75 +15,130 @@ HOOK_WORDS = {
     "worst", "stop", "mistake", "money", "free", "now", "today", "first",
     "imagine", "crazy", "insane", "actually", "literally", "because", "but",
     "wait", "listen", "watch", "look", "here's", "this", "nobody", "everyone",
+    "goal", "wow", "unbelievable", "incredible", "scores", "wins", "history",
 }
 NUM_RE = re.compile(r"\b\d+\b")
-SENT_END_RE = re.compile(r"[.!?]\s*$")
+SENT_END_RE = re.compile(r"[.!?]$")
+_TOKEN_RE = re.compile(r"[a-z']+")
 
 
-def _score_window(words_in_window, full_text):
-    if not words_in_window:
+def _tokens(text):
+    return _TOKEN_RE.findall(text.lower())
+
+
+def _score_window(win_words, text, target_len):
+    if not win_words:
         return 0.0
-    duration = words_in_window[-1]["end"] - words_in_window[0]["start"]
+    duration = win_words[-1]["end"] - win_words[0]["start"]
     if duration <= 0:
         return 0.0
 
-    wps = len(words_in_window) / duration            # words per second
-    density = min(wps / 3.0, 1.0)                     # ~3 wps is lively speech
+    wps = len(win_words) / duration
+    density = min(wps / 3.0, 1.0)               # ~3 words/sec is lively
 
-    text = full_text.lower()
-    hooks = sum(1 for w in HOOK_WORDS if w in text)
-    hook_score = min(hooks / 8.0, 1.0)
+    toks = _tokens(text)
+    hooks = len(set(toks) & HOOK_WORDS)
+    hook_score = min(hooks / 6.0, 1.0)
 
-    numbers = len(NUM_RE.findall(full_text))
-    num_score = min(numbers / 3.0, 1.0)
+    num_score = min(len(NUM_RE.findall(text)) / 3.0, 1.0)
 
-    ends_clean = 1.0 if SENT_END_RE.search(full_text.strip()) else 0.0
+    ends_clean = 1.0 if SENT_END_RE.search(text.strip()) else 0.0
 
-    return 0.45 * density + 0.30 * hook_score + 0.10 * num_score + 0.15 * ends_clean
+    # prefer clips near the target length so ~max_clips of them tile the video
+    # (keeps clips punchy instead of one long clip eating the whole timeline)
+    length_score = max(0.0, 1.0 - abs(duration - target_len) / target_len)
+
+    return (0.34 * density + 0.24 * hook_score + 0.08 * num_score
+            + 0.14 * ends_clean + 0.20 * length_score)
 
 
-def pick_moments(words, clip_seconds=30, max_clips=5, min_gap=15, video_duration=None):
-    """Return list of (start, end) tuples for the best windows."""
+def _units(words, pause_gap=0.45):
+    """Split words into natural cut units: break after sentence-ending
+    punctuation or a speech pause longer than `pause_gap` seconds."""
+    units, cur = [], []
+    for i, w in enumerate(words):
+        cur.append(w)
+        ends_punct = bool(SENT_END_RE.search(w["word"].strip()))
+        gap_next = (words[i + 1]["start"] - w["end"]) if i + 1 < len(words) else 1e9
+        if ends_punct or gap_next >= pause_gap:
+            units.append(cur)
+            cur = []
+    if cur:
+        units.append(cur)
+    return units
+
+
+def pick_moments(words, max_clip_seconds=60, min_clip_seconds=8, max_clips=5,
+                 video_duration=None, **_legacy):
+    """Return list of (start, end) tuples for the best clips, at natural
+    boundaries, each between min_clip_seconds and max_clip_seconds long."""
     if not words:
-        # No speech detected — fall back to evenly spaced cuts.
-        return _fallback_even(video_duration, clip_seconds, max_clips)
+        return _fallback_even(video_duration, min_clip_seconds, max_clip_seconds, max_clips)
 
+    units = _units(words)
+    spans = [(u[0]["start"], u[-1]["end"], u) for u in units]
     end_of_speech = words[-1]["end"]
-    step = max(clip_seconds / 3.0, 5)  # slide in thirds of a clip
-    candidates = []
+    hard_end = video_duration or end_of_speech
 
-    t = words[0]["start"]
-    while t + clip_seconds <= end_of_speech + step:
-        win = [w for w in words if t <= w["start"] < t + clip_seconds]
-        text = " ".join(w["word"] for w in win)
-        score = _score_window(win, text)
-        candidates.append({"start": t, "end": t + clip_seconds, "score": score})
-        t += step
+    # Aim for ~max_clips clips spread across the video: target each clip near
+    # (speech length / max_clips), clamped to the allowed range.
+    speech_len = end_of_speech - words[0]["start"]
+    target_len = min(max(speech_len / max(max_clips, 1), min_clip_seconds), max_clip_seconds)
+
+    # Build candidate clips = contiguous runs of whole units within length bounds.
+    candidates = []
+    n = len(spans)
+    for i in range(n):
+        for j in range(i, n):
+            start = spans[i][0]
+            end = spans[j][1]
+            dur = end - start
+            if dur > max_clip_seconds:
+                break  # extending j only makes it longer
+            if dur < min_clip_seconds:
+                continue
+            win = [w for k in range(i, j + 1) for w in spans[k][2]]
+            text = " ".join(w["word"] for w in win)
+            candidates.append({"start": start, "end": end,
+                               "score": _score_window(win, text, target_len)})
 
     if not candidates:
-        return _fallback_even(video_duration or end_of_speech, clip_seconds, max_clips)
+        return _fallback_even(hard_end, min_clip_seconds, max_clip_seconds, max_clips)
 
     candidates.sort(key=lambda c: c["score"], reverse=True)
 
     chosen = []
     for c in candidates:
-        if any(abs(c["start"] - x["start"]) < (clip_seconds + min_gap) for x in chosen):
+        overlaps = any(not (c["end"] <= x["start"] or c["start"] >= x["end"]) for x in chosen)
+        if overlaps:
             continue
         chosen.append(c)
         if len(chosen) >= max_clips:
             break
 
     chosen.sort(key=lambda c: c["start"])
-    print(f"[moments] picked {len(chosen)} clips: "
-          + ", ".join(f"{c['start']:.0f}-{c['end']:.0f}s({c['score']:.2f})" for c in chosen))
-    return [(c["start"], c["end"]) for c in chosen]
+    out = []
+    for c in chosen:
+        # tiny lead-in / tail so we don't clip the first/last syllable
+        s = max(c["start"] - 0.15, 0.0)
+        e = min(c["end"] + 0.3, hard_end)
+        out.append((s, e))
+
+    print(f"[moments] picked {len(out)} clips: "
+          + ", ".join(f"{s:.0f}-{e:.0f}s" for s, e in out))
+    return out
 
 
-def _fallback_even(duration, clip_seconds, max_clips):
-    if not duration:
-        return [(0, clip_seconds)]
-    out, t = [], 0
-    while t + clip_seconds <= duration and len(out) < max_clips:
-        out.append((t, t + clip_seconds))
-        t += clip_seconds
-    return out or [(0, min(clip_seconds, duration))]
+def _fallback_even(duration, min_len, max_len, max_clips):
+    """No usable speech — split the video into up to max_clips evenly-spaced
+    clips. Without a transcript we can't find natural boundaries; this at least
+    yields several clips instead of one. (For true action-aware cuts on silent
+    footage, scene-change detection would be needed.)"""
+    if not duration or duration < min_len:
+        return [(0.0, duration or max_len)]
+    target = min(max(duration / max_clips, min_len), max_len)
+    out, t = [], 0.0
+    while t + min_len <= duration and len(out) < max_clips:
+        out.append((t, min(t + target, duration)))
+        t += target
+    return out or [(0.0, min(max_len, duration))]

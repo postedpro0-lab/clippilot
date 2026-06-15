@@ -25,7 +25,7 @@ min_source_seconds: 90
 # scene changes for silent footage) so they never break mid-action.
 max_clip_seconds: 60            # a clip can be up to this long (must stay < 60)
 min_clip_seconds: 8             # ignore segments shorter than this
-max_clips_per_video: 5          # how many clips to make per long video
+max_clips_per_video: 10         # how many clips to make per long video
 
 # 9:16 output size (don't change unless you know why)
 out_width: 1080
